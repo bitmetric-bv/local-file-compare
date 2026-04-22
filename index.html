@@ -206,6 +206,11 @@
     .diff-nonzero  { background: #ffebee; color: #c62828; font-weight: 600; }
     .diff-text     { background: #f5f5f5; color: #888; }
 
+    .key-cell { cursor: pointer; }
+    .key-cell:hover { color: #1565c0; text-decoration: underline dotted; }
+    .key-cell.copied { color: #2e7d32 !important; }
+    .key-cell.copied::after { content: ' ✓'; font-weight: 400; }
+
     .hidden { display: none; }
   </style>
 </head>
@@ -665,6 +670,14 @@ function buildDataRow(row) {
   const keyTd = document.createElement('td');
   keyTd.textContent = row.key;
   keyTd.style.fontWeight = '600';
+  keyTd.className = 'key-cell';
+  keyTd.title = 'Klik om te kopiëren';
+  keyTd.addEventListener('click', function() {
+    navigator.clipboard.writeText(row.key).then(function() {
+      keyTd.classList.add('copied');
+      setTimeout(function() { keyTd.classList.remove('copied'); }, 1200);
+    });
+  });
   tr.appendChild(keyTd);
 
   // Status
