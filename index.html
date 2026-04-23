@@ -441,12 +441,16 @@ function compareData(fileA, fileB, keyColumn, valueColumns, postProgress) {
     const resultRow = { key: key, status: 'Only in B', values: [] };
     valueColumns.forEach(function(col) {
       const bRaw = row[col];
+      const bIsNum = isNumericVal(bRaw);
+      const bNum   = (bIsNum && bRaw !== undefined && bRaw !== null && bRaw !== '')
+                     ? toNum(bRaw) : null;
       resultRow.values.push({
         column: col,
-        aVal: '',
+        aVal: '', aNum: null,
         bVal: bRaw !== undefined ? bRaw : '',
+        bNum: bNum,
         diff: null,
-        isNumeric: isNumericVal(bRaw),
+        isNumeric: bIsNum,
       });
     });
     results.push(resultRow);
