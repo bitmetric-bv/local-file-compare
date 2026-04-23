@@ -2,6 +2,8 @@
 
 A browser-based tool for comparing two CSV or XLSX files row by row. No server, no installation — go to https://bitmetric-bv.github.io/local-file-compare and everything runs locally in the browser.
 
+<img width="2372" height="1258" alt="Schermopname_23-4-2026_134223_bitmetric-bv github io" src="https://github.com/user-attachments/assets/87b533b2-8ef8-4631-a931-e5427940d1b9" />
+
 ## Features
 
 - Supports CSV and XLSX/XLS files
