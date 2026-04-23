@@ -400,7 +400,7 @@ function compareData(fileA, fileB, keyColumn, valueColumns, postProgress) {
       // Round to 2 decimals before comparing and computing diff
       var aR2 = (isNum && aNum !== null) ? Math.round(aNum * 100) / 100 : aNum;
       var bR2 = (isNum && bNum !== null) ? Math.round(bNum * 100) / 100 : bNum;
-      const diff = (isNum && aR2 !== null && bR2 !== null) ? (bR2 - aR2) : null;
+      const diff = (isNum && aR2 !== null && bR2 !== null && bRow) ? (bR2 - aR2) : null;
 
       resultRow.values.push({
         column: col,
