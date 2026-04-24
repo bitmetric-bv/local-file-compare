@@ -226,8 +226,8 @@
   <div>
     <h2>File A</h2>
     <div class="upload-zone" id="uploadZoneA">
-      <label class="upload-zone-label">📁 Click or drop CSV / XLSX</label>
-      <input type="file" id="fileInputA" accept=".csv,.xlsx,.xls">
+      <label class="upload-zone-label">📁 Click or drop CSV / XLSX / QVD</label>
+      <input type="file" id="fileInputA" accept=".csv,.xlsx,.xls,.qvd">
       <div class="file-name" id="fileNameA"></div>
     </div>
   </div>
@@ -235,8 +235,8 @@
   <div>
     <h2>File B</h2>
     <div class="upload-zone" id="uploadZoneB">
-      <label class="upload-zone-label">📁 Click or drop CSV / XLSX</label>
-      <input type="file" id="fileInputB" accept=".csv,.xlsx,.xls">
+      <label class="upload-zone-label">📁 Click or drop CSV / XLSX / QVD</label>
+      <input type="file" id="fileInputB" accept=".csv,.xlsx,.xls,.qvd">
       <div class="file-name" id="fileNameB"></div>
     </div>
   </div>
@@ -535,6 +535,102 @@ const state = {
 };
 
 // ════════════════════════════════════════════════════════════════
+// QVD parser  (QlikView / QlikSense binary format)
+// ════════════════════════════════════════════════════════════════
+function parseQvd(arrayBuffer) {
+  const u8 = new Uint8Array(arrayBuffer);
+  const dv = new DataView(arrayBuffer);
+
+  // XML header is null-terminated
+  let xmlLen = 0;
+  while (xmlLen < u8.length && u8[xmlLen] !== 0) xmlLen++;
+  if (xmlLen === u8.length) throw new Error('Invalid QVD: header terminator not found');
+
+  const xmlDoc = new DOMParser().parseFromString(
+    new TextDecoder('utf-8').decode(u8.subarray(0, xmlLen)), 'text/xml'
+  );
+  if (xmlDoc.querySelector('parsererror')) throw new Error('Invalid QVD: malformed XML header');
+
+  function txt(parent, tag) {
+    const el = parent.querySelector(tag);
+    return el ? el.textContent.trim() : '0';
+  }
+
+  const noOfRecords    = parseInt(txt(xmlDoc, 'NoOfRecords'))    || 0;
+  const recordByteSize = parseInt(txt(xmlDoc, 'RecordByteSize')) || 0;
+
+  const fields = Array.from(xmlDoc.querySelectorAll('QvdFieldHeader')).map(function(fh) {
+    return {
+      name:        txt(fh, 'FieldName'),
+      bitOffset:   parseInt(txt(fh, 'BitOffset'))   || 0,
+      bitWidth:    parseInt(txt(fh, 'BitWidth'))     || 0,
+      bias:        parseInt(txt(fh, 'Bias'))         || 0,
+      noOfSymbols: parseInt(txt(fh, 'NoOfSymbols')) || 0,
+      offset:      parseInt(txt(fh, 'Offset'))       || 0,
+      length:      parseInt(txt(fh, 'Length'))       || 0,
+    };
+  });
+
+  // Symbol section starts right after the null byte
+  const symBase = xmlLen + 1;
+  const dec = new TextDecoder('utf-8');
+
+  const allSymbols = fields.map(function(field) {
+    const syms = [];
+    let p = symBase + field.offset;
+    const pEnd = p + field.length;
+
+    while (p < pEnd && syms.length < field.noOfSymbols) {
+      const type = u8[p++];
+      switch (type) {
+        case 1:                                            // 4-byte integer
+          syms.push(dv.getInt32(p, true)); p += 4; break;
+        case 2:                                            // 8-byte double
+          syms.push(dv.getFloat64(p, true)); p += 8; break;
+        case 4: {                                          // null-terminated string
+          const s = p; while (p < u8.length && u8[p] !== 0) p++;
+          syms.push(dec.decode(u8.subarray(s, p++))); break;
+        }
+        case 5: {                                          // dual int — use string part
+          p += 4;
+          const s = p; while (p < u8.length && u8[p] !== 0) p++;
+          syms.push(dec.decode(u8.subarray(s, p++))); break;
+        }
+        case 6: {                                          // dual double — use string part
+          p += 8;
+          const s = p; while (p < u8.length && u8[p] !== 0) p++;
+          syms.push(dec.decode(u8.subarray(s, p++))); break;
+        }
+        default: p = pEnd; // unknown type — stop this field
+      }
+    }
+    return syms;
+  });
+
+  // Record section follows all symbol data
+  const symTotal = fields.reduce(function(mx, f) { return Math.max(mx, f.offset + f.length); }, 0);
+  const recBase  = symBase + symTotal;
+
+  const rows = [];
+  for (let r = 0; r < noOfRecords; r++) {
+    const rOff = recBase + r * recordByteSize;
+    const row  = {};
+    fields.forEach(function(field, fi) {
+      let idx = 0;
+      for (let b = 0; b < field.bitWidth; b++) {
+        const abs = field.bitOffset + b;
+        if (u8[rOff + Math.floor(abs / 8)] & (1 << (abs % 8))) idx |= (1 << b);
+      }
+      const symIdx = idx + field.bias;
+      const syms   = allSymbols[fi];
+      row[field.name] = (symIdx >= 0 && symIdx < syms.length) ? syms[symIdx] : '';
+    });
+    rows.push(row);
+  }
+  return rows;
+}
+
+// ════════════════════════════════════════════════════════════════
 // File parsing
 // ════════════════════════════════════════════════════════════════
 function parseFile(file) {
@@ -553,6 +649,14 @@ function parseFile(file) {
           const data = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
           resolve(data || []);
         } catch(err) { reject(err); }
+      };
+      reader.onerror = function() { reject(new Error('Failed to read file')); };
+      reader.readAsArrayBuffer(file);
+    } else if (file.name.match(/\.qvd$/i)) {
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        try { resolve(parseQvd(e.target.result)); }
+        catch(err) { reject(err); }
       };
       reader.onerror = function() { reject(new Error('Failed to read file')); };
       reader.readAsArrayBuffer(file);

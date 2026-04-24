@@ -1,10 +1,10 @@
 # File Comparison Tool
 
-A browser-based tool for comparing two CSV or XLSX files row by row. No server, no installation — go to https://bitmetric-bv.github.io/local-file-compare and everything runs locally in the browser.
+A browser-based tool for comparing two CSV, XLSX, or QVD files row by row. No server, no installation — go to https://bitmetric-bv.github.io/local-file-compare and everything runs locally in the browser.
 
 ## Features
 
-- Supports CSV and XLSX/XLS files
+- Supports CSV, XLSX/XLS, and QVD (QlikSense / QlikView) files
 - Select a key column to join rows across both files
 - Select one or more value columns to compare
 - Detects numeric differences and displays them with sign and two decimal places
@@ -34,3 +34,4 @@ Vendored in `vendor/`, no CDN or internet connection required.
 
 - [PapaParse 5.4.1](https://www.papaparse.com/) — CSV parsing
 - [SheetJS 0.18.5 (xlsx)](https://sheetjs.com/) — XLSX/XLS parsing
+- QVD parsing is implemented natively — no external library needed
