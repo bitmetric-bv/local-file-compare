@@ -212,6 +212,11 @@
     .key-cell.copied::after { content: ' ✓'; font-weight: 400; }
 
     .hidden { display: none; }
+
+    .no-common-warning {
+      background: #fff3e0; border: 1px solid #ffb74d; border-radius: 4px;
+      padding: 8px 10px; font-size: 11px; color: #e65100; line-height: 1.5;
+    }
   </style>
 </head>
 <body>
@@ -242,10 +247,19 @@
   </div>
 
   <div id="configSection" class="hidden">
+    <div id="noCommonWarning" class="no-common-warning hidden">
+      ⚠ No common columns found — select the matching key columns manually below.
+    </div>
     <div class="form-group">
-      <label for="keyColumn">Key column</label>
-      <select id="keyColumn" disabled>
-        <option value="">Select a key column…</option>
+      <label for="keyColumnA">Key column (File A)</label>
+      <select id="keyColumnA" disabled>
+        <option value="">Select…</option>
+      </select>
+    </div>
+    <div class="form-group" style="margin-top:8px">
+      <label for="keyColumnB">Key column (File B)</label>
+      <select id="keyColumnB" disabled>
+        <option value="">Select…</option>
       </select>
     </div>
 
@@ -372,21 +386,21 @@ function isNumericVal(val) {
 // Comparison  (runs in Worker; also called from main thread for
 //              the worker-source-via-toString trick)
 // ════════════════════════════════════════════════════════════════
-function compareData(fileA, fileB, keyColumn, valueColumns, postProgress) {
+function compareData(fileA, fileB, keyColumnA, keyColumnB, valueColumns, postProgress) {
   postProgress = postProgress || function() {};
   const results = [];
 
   // Build O(1) lookup for file B
   const bLookup = Object.create(null);
   fileB.forEach(function(row) {
-    const key = row[keyColumn];
+    const key = row[keyColumnB];
     if (key !== undefined && key !== null) bLookup[String(key)] = row;
   });
 
   const totalA = fileA.length || 1;
 
   fileA.forEach(function(row, idx) {
-    const key = row[keyColumn];
+    const key = row[keyColumnA];
     if (key === undefined || key === null) return;
     const keyStr = String(key);
     const bRow = bLookup[keyStr];
@@ -430,11 +444,11 @@ function compareData(fileA, fileB, keyColumn, valueColumns, postProgress) {
   // Find rows only in B
   const aKeySet = Object.create(null);
   fileA.forEach(function(r) {
-    const k = r[keyColumn];
+    const k = r[keyColumnA];
     if (k !== undefined && k !== null) aKeySet[String(k)] = true;
   });
   fileB.forEach(function(row) {
-    const key = row[keyColumn];
+    const key = row[keyColumnB];
     if (key === undefined || key === null) return;
     if (aKeySet[String(key)]) return;
 
@@ -470,7 +484,7 @@ const WORKER_SRC = [
   `self.onmessage = function(e) {
     var d = e.data;
     var results = compareData(
-      d.fileA, d.fileB, d.keyColumn, d.valueColumns,
+      d.fileA, d.fileB, d.keyColumnA, d.keyColumnB, d.valueColumns,
       function(pct) { self.postMessage({ type: 'progress', pct: pct }); }
     );
     self.postMessage({ type: 'done', results: results });
@@ -479,7 +493,7 @@ const WORKER_SRC = [
 
 let activeWorker = null;
 
-function runComparison(keyColumn, valueColumns) {
+function runComparison(keyColumnA, keyColumnB, valueColumns) {
   if (activeWorker) { activeWorker.terminate(); activeWorker = null; }
 
   setLoading(true, 0);
@@ -511,7 +525,7 @@ function runComparison(keyColumn, valueColumns) {
 
   activeWorker.postMessage({
     fileA: state.fileA, fileB: state.fileB,
-    keyColumn: keyColumn, valueColumns: valueColumns,
+    keyColumnA: keyColumnA, keyColumnB: keyColumnB, valueColumns: valueColumns,
   });
 }
 
@@ -710,16 +724,25 @@ function refreshConfigUI() {
   document.getElementById('configSection').classList.toggle('hidden', !ready);
   if (!ready) return;
 
-  // Key column: must exist in both files
   const common = state.columnsA.filter(function(c) { return state.columnsB.includes(c); });
-  const keySelect = document.getElementById('keyColumn');
-  keySelect.disabled = false;
-  keySelect.innerHTML = '<option value="">Select a key column…</option>';
-  common.forEach(function(col) {
-    const o = document.createElement('option');
-    o.value = col; o.textContent = col;
-    keySelect.appendChild(o);
-  });
+  const hasCommon = common.length > 0;
+  document.getElementById('noCommonWarning').classList.toggle('hidden', hasCommon);
+
+  function fillSelect(selectId, cols, preselect) {
+    const sel = document.getElementById(selectId);
+    sel.disabled = false;
+    sel.innerHTML = '<option value="">Select…</option>';
+    cols.forEach(function(col) {
+      const o = document.createElement('option');
+      o.value = col; o.textContent = col;
+      if (col === preselect) o.selected = true;
+      sel.appendChild(o);
+    });
+  }
+
+  const autoKey = hasCommon ? common[0] : '';
+  fillSelect('keyColumnA', state.columnsA, autoKey);
+  fillSelect('keyColumnB', state.columnsB, autoKey);
 
   // Value columns: union of both files
   const all = Array.from(new Set([...state.columnsA, ...state.columnsB]));
@@ -735,6 +758,8 @@ function refreshConfigUI() {
     wrap.appendChild(cb); wrap.appendChild(lbl);
     group.appendChild(wrap);
   });
+
+  updateKeyColumnVisibility();
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -1035,15 +1060,16 @@ setupUploadZone('uploadZoneA', 'fileInputA', 'A');
 setupUploadZone('uploadZoneB', 'fileInputB', 'B');
 
 document.getElementById('compareBtn').addEventListener('click', function() {
-  const keyCol  = document.getElementById('keyColumn').value;
+  const keyColA = document.getElementById('keyColumnA').value;
+  const keyColB = document.getElementById('keyColumnB').value;
   const valCols = Array.from(
     document.querySelectorAll('#valueColumnsGroup input[type="checkbox"]:checked')
   ).map(function(cb) { return cb.value; });
 
-  if (!keyCol)         { alert('Please select a key column.'); return; }
-  if (!valCols.length) { alert('Please select at least one value column.'); return; }
+  if (!keyColA || !keyColB) { alert('Please select a key column for both files.'); return; }
+  if (!valCols.length)      { alert('Please select at least one value column.'); return; }
 
-  runComparison(keyCol, valCols);
+  runComparison(keyColA, keyColB, valCols);
 });
 
 document.getElementById('resetBtn').addEventListener('click', resetAll);
@@ -1058,19 +1084,24 @@ document.querySelectorAll('.pill').forEach(function(pill) {
   });
 });
 
-document.getElementById('keyColumn').addEventListener('change', function() {
-  const key = this.value;
-  document.getElementById('compareBtn').disabled = !key;
+function updateKeyColumnVisibility() {
+  const keyA = document.getElementById('keyColumnA').value;
+  const keyB = document.getElementById('keyColumnB').value;
+  const hidden = new Set([keyA, keyB].filter(Boolean));
   document.querySelectorAll('#valueColumnsGroup .checkbox-item').forEach(function(item) {
     const cb = item.querySelector('input[type="checkbox"]');
-    if (cb.value === key) {
+    if (hidden.has(cb.value)) {
       item.style.display = 'none';
       cb.checked = false;
     } else {
       item.style.display = '';
     }
   });
-});
+  document.getElementById('compareBtn').disabled = !(keyA && keyB);
+}
+
+document.getElementById('keyColumnA').addEventListener('change', updateKeyColumnVisibility);
+document.getElementById('keyColumnB').addEventListener('change', updateKeyColumnVisibility);
 
 fetch('https://api.github.com/repos/bitmetric-bv/local-file-compare/commits?per_page=1')
   .then(function(r) { return r.json(); })
